@@ -1,4 +1,7 @@
 eclipse.preferences.version=1
-encoding//Analysis/DirectMatching.py=utf-8
-encoding//GitHub/PreprocessDataset.py=utf-8
-encoding//LogTranslation/happyfuntokenizing.py=utf-8
+encoding//EdX/DirectMatching.py=utf-8
+encoding//Linkedin/proxy.py=utf8
+encoding//StackExchange/ExplicitMatching.py=utf-8
+encoding//StackExchange/PreprocessDataset.py=utf-8
+encoding//StackExchangeAnalysis/happyfuntokenizing.py=utf-8
+encoding//TwitterAnalysis/happierfuntokenizing.py=utf-8

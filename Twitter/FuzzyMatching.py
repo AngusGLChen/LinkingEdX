@@ -5,92 +5,24 @@ Created on Nov 27, 2015
 '''
 
 import sys
+from sklearn.learning_curve import learning_curve
 reload(sys)
 sys.setdefaultencoding("utf-8")
 
-import os
-import re
-import time
-import string
-
-from lxml import etree
-
-import urllib, urllib2
-import hashlib
-
-import json
-from PIL import Image
-
-import requests
+import time, os, json, requests, urllib2, tweepy
 from lxml import html
+from Functions.CommonFunctions import ReadEdX, CompareImages
 
-import Levenshtein
 
-import tweepy
-    
-def CompareImages(img1, img2):
-    
-    hash1 = avhash(img1)
-    hash2 = avhash(img2)
-    
-    dist = hamming(hash1, hash2)       
-    similarity = (36 - dist) / 36
- 
-    if similarity >= 0.9:
-        return True
-    else:
-        return False
-    
-def avhash(im):
-    
-    if not isinstance(im, Image.Image):
-        im = Image.open(im)
-    
-    im = im.resize((6, 6), Image.ANTIALIAS).convert('L')
-    avg = reduce(lambda x, y: x + y, im.getdata()) / 36.
-    return reduce(lambda x, (y, z): x | (z << y),
-                  enumerate(map(lambda i: 0 if i < avg else 1, im.getdata())),
-                  0)
-
-def hamming(h1, h2):
-    h, d = 0, h1 ^ h2
-    while d:
-        h += 1
-        d &= d - 1
-    return h
-
-def ReadEdX(path):
-    
-    edx_learners_map = {}
-    edx_learners_set = set()
-    
-    input = open(path, "r")
-    lines = input.readlines()
-    for line in lines:
-        array = line.replace("\n", "").split("\t")
-        course_id = array[0]
-        email = array[1]
-        login = array[2]
-        name = array[3]
-        
-        if email in edx_learners_set:
-            edx_learners_map[email]["courses"].append(course_id)
-        else:
-            edx_learners_set.add(email)
-            edx_learners_map[email] = {"login":login, "name": name, "courses":[course_id]}
-        
-    input.close()
-            
-    return (edx_learners_set, edx_learners_map)
 
 def FuzzyMatching(path):
     
     # Read EdX learners
-    edx_path = path + "/course_metadata/course_email_list"
+    edx_path = path + "course_metadata/course_email_list"
     edx_learners_set, edx_learners_map = ReadEdX(edx_path)
     
     # Read Directly-matched EdX learners
-    matching_results_path = path + "/latest_matching_result_0"
+    matching_results_path = path + "latest_matching_result_0"
     matching_results_file = open(matching_results_path, "r")
     jsonLine = matching_results_file.read()
     matching_results_map = json.loads(jsonLine)
@@ -99,44 +31,57 @@ def FuzzyMatching(path):
     # Gather the unmatched twitter learners  
     matching_results_set = set()
     for learner in matching_results_map.keys():
+        matching_results_set.add(learner)
+        
         if "twitter" in matching_results_map[learner]["checked_platforms"]:            
             edx_learners_set.remove(learner)
-    print "# unmatched learners is:\t" + str(len(edx_learners_set)) + "\n"
         
+    print "# unmatched learners is:\t" + str(len(edx_learners_set)) + "\n"
+    
     # Fuzzy matching results
     fuzzy_matching_results_map = {}
     fuzzy_matching_results_set = set()
     
     # Read fuzzy matching results
-    fuzzy_matching_results_path = path + "/twitter/fuzzy_matching_5"
+    fuzzy_matching_results_path = path + "twitter/fuzzy_matching_dec30"
     num_matched_learners = 0
     
     if os.path.exists(fuzzy_matching_results_path):
         fuzzy_matching_results_file = open(fuzzy_matching_results_path, "r+")
         lines = fuzzy_matching_results_file.readlines()
-        for i in range(len(lines)-5):
-            line = lines[i].replace("\r\n", "").replace("\n", "")
+        # for i in range(len(lines)-5):
+        for i in range(len(lines)):
+            
+            line = lines[i].replace("\r\n", "")
+            line = line.replace("\n", "")
+            
             array = line.split("\t")
+            
+            if len(array) != 2:
+                # print file + "\t" + line
+                continue
+            
+            '''
+            if array[1] != "" and "twitter.com" not in array[1]:
+                print file + "\t" + line
+                continue
+            '''
+            
             learner = array[0]
-            twitter_login = array[1]
-            fuzzy_matching_results_map[learner] = twitter_login
-            fuzzy_matching_results_set.add(learner)        
+            login = array[1]
+            
+            fuzzy_matching_results_map[learner] = login
+            fuzzy_matching_results_set.add(learner)
         
         for learner in fuzzy_matching_results_map.keys():
             if fuzzy_matching_results_map[learner] != "":
-                num_matched_learners += 1  
+                num_matched_learners += 1
+                
         print "# previous matched learners is:\t" + str(num_matched_learners) + "\n"
         
     else:
-        fuzzy_matching_results_file = open(fuzzy_matching_results_path, "w")
         
-    count = len(fuzzy_matching_results_map)
-    multitask_count = 0
-    
-    current_time = time.time()
-    
-    candidates_map = {}
-    candidates_set = set()
+        fuzzy_matching_results_file = open(fuzzy_matching_results_path, "w")
     
     # Twitter connection
     
@@ -163,17 +108,23 @@ def FuzzyMatching(path):
                    'WTdFLVpiarx7xzKTz38jSlEWbNRETKoyOwNPwd2Sh7sJGAczLK',
                    '2609369460-4J2FJBLSW2UEK4yoSTIPnBIEpqQk2ZnlvwfFIRo',
                    '2UWmhdAwJLLfN8BeNFoKSVFzoUHrd2HsJ3IzfpC3FJT8o']]
-    
+    # 4
     oauth_keys = [['3CBCHEMcRc4SuudrWGNCskUgD',
                    'lW8V6lHr55eZ2jxnw83znvGbAZ6eDwuTFSaKsz69y3uCLSbM8P',
                    '2983438302-HJoYZD4dPppINFz4BDhIcX3119mjcBEp7wPLpbn',
                    'sVONXbKI3JPvu7Sj4oKi1PgLmpTYUd6ACgXqAXXzGIHwa']]
-    
+    # 5
     oauth_keys = [['6tbcOoHtfysOqklyHbDM4zZYv',
-                   '4LO5XKPQhmeqfhATrqUL1i9BuBj1LTrBdT2qFCG8yOAoG4qCLf',
+                   'XGOjGUR9yinTNw1QXZpY7JWaCvTgifQDZB7T2RopPWEBWcPTaA',
                    '2609369460-YZBezh1tkqtqmP7gL6sA5t9WZTa3gyBMF6oNFcx',
                    'Sej4ILlK2SxAjcooT7fiEetAfuwe8YwBqyexYpN6F4q7m']]
     
+    # 6
+    oauth_keys = [['poPoW3gT05PxObaCyO3wXy1iV',
+                   '4LO5XKPQhmeqfhATrqUL1i9BuBj1LTrBdT2qFCG8yOAoG4qCLf',
+                   '2902759920-wO9PJmZnBFJAFz7bR2uH05HR8U6UVQISUU1TsV6',
+                   'zkZp20dvGurCwLxhOTq3ZkVTElcWN3gPxta57PuMygIJS']]
+
     auths = []
     global Tweeapi
     
@@ -185,34 +136,27 @@ def FuzzyMatching(path):
 
         Tweeapi = tweepy.API(auths[0], retry_count=10, retry_delay=60, wait_on_rate_limit=True,
                              wait_on_rate_limit_notify=True)
+        
+    count = 0
+    current_time = time.time()
     
+    candidates_map = {}
+    candidates_set = set()
     
-    for learner in edx_learners_set:
+    # for learner in edx_learner_set:
+    for learner in suplement_set:
+        
+        count += 1
         
         if learner in fuzzy_matching_results_set:
             continue
         
-        multitask_count += 1
-        
-        #if multitask_count > 50000:
+        #if count < 80000:
         #    continue
         
-        #if multitask_count < 50000 or multitask_count > 100000:
-        #    continue
-        
-        #if multitask_count < 100000 or multitask_count > 150000:
-        #    continue
-        
-        #if multitask_count < 150000 or multitask_count > 200000:
-        #    continue
-        
-        #if multitask_count < 200000 or multitask_count > 260000:
-        #    continue
-        
-        if multitask_count < 260000:
+        if count < 27000 or count > 36000:
             continue
         
-        count += 1
         if count % 100 == 0:
             update_time = time.time()
             print "Current count is:\t" + str(count) + "\t" + str(num_matched_learners) + "\t" + str((update_time - current_time) / 60)
@@ -241,7 +185,9 @@ def FuzzyMatching(path):
                 try:
                     users = Tweeapi.search_users(q=names[key], per_page=10, page=0)
                 except Exception as e:
-                    print "Errors occur when crawlling Twiter...\t" + str(e) 
+                    if e.message[0]['code'] not in [47]:
+                        print "Errors occur when crawlling Twiter...\t" + str(e)
+                        return
                 
                 for user in users:
                     
@@ -250,13 +196,16 @@ def FuzzyMatching(path):
                     
                     # Check whether the candidate user's information has been downloaded or not
                     url = "http://twitter.com/" + login
-                    candidate_pic_path = path + "/twitter/candidate_pics/" + login + ".jpg"
+                    candidate_pic_path = path + "twitter/candidate_pics/" + login + ".jpg"
                     
                     if login not in candidates_set:
                         
                         try:
-                            page = requests.get(url)
-                            tree = html.fromstring(page.content)
+                            #page = requests.get(url)
+                            #tree = html.fromstring(page.content)
+                            
+                            page = urllib2.urlopen(url, timeout=30).read()
+                            tree = html.fromstring(page)
                                     
                             return_link = tree.xpath('//a[@class="u-textUserColor"]/@title')
                             if len(return_link) != 0:
@@ -269,14 +218,12 @@ def FuzzyMatching(path):
                                 pic_link = pic_link[0]
                             else:
                                 pic_link = ""
-                                
-                                    
+                            
                             candidates_set.add(login)
                             candidates_map[login] = {"return_link": return_link, "name":name}                           
                                     
-                            if pic_link != "":
-                                pic = urllib2.urlopen(pic_link)
-                                        
+                            if pic_link != "" and not os.path.exists(candidate_pic_path):
+                                pic = urllib2.urlopen(pic_link) 
                                 output = open(candidate_pic_path, "wb")
                                 output.write(pic.read())
                                 output.close()
@@ -294,14 +241,14 @@ def FuzzyMatching(path):
                             num_matched_learners += 1
                             break
                         else:
-                            if login == edx_learners_map[learner]["login"] and candidates_map[login]["name"] == edx_learners_map[learner]["name"]:
+                            if str.lower(login) == str.lower(edx_learners_map[learner]["login"]) and str.lower(candidates_map[login]["name"]) == str.lower(edx_learners_map[learner]["name"]):
                                 search_mark = False
                                 fuzzy_matching_results_map[learner] = login
                                 fuzzy_matching_results_file.write(learner + "\t" + str(login) + "\n")
                                 num_matched_learners += 1
                                 break
                             else:
-                                profile_pic_path = path + "/profile_pics/" + str(learner)
+                                profile_pic_path = path + "profile_pics/" + str(learner)
                                     
                                 if os.path.exists(candidate_pic_path) and os.path.exists(profile_pic_path):
                                     
@@ -311,7 +258,10 @@ def FuzzyMatching(path):
                                     for file in files:
                                         
                                         # Compare the candidate pic and the matched profile picture
-                                        compare_mark = CompareImages(profile_pic_path + "/" + file, candidate_pic_path)
+                                        try:
+                                            compare_mark = CompareImages(profile_pic_path + "/" + file, candidate_pic_path)
+                                        except Exception as e:
+                                            print "Image comparison error..."
                                         
                                         if compare_mark:
                                             search_mark = False
@@ -341,15 +291,32 @@ def MergeMatchingResults(path):
     # 1. Read unmatched learners
     
     # Read EdX learners
-    edx_path = path + "/course_metadata/course_email_list"
+    edx_path = path + "course_metadata/course_email_list"
     edx_learners_set, edx_learners_map = ReadEdX(edx_path)
     
     # Read Directly-matched EdX learners
-    matching_results_path = path + "/latest_matching_result_0"
+    matching_results_path = path + "latest_matching_result_0"
     matching_results_file = open(matching_results_path, "r")
     jsonLine = matching_results_file.read()
     matching_results_map = json.loads(jsonLine)
     matching_results_file.close()
+    
+    ###############################
+    '''
+    suplement_set = set()
+    for learner in matching_results_map.keys():
+        if "twitter" not in matching_results_map[learner]["checked_platforms"]:
+            matched_links = set()
+            for link_record in matching_results_map[learner]["matched_platforms"]:
+                matched_links.add(link_record["url"])
+            for link_record in matching_results_map[learner]["link_records"]:
+                matched_links.add(link_record["url"])
+            
+            if len(matched_links) != 0 and learner in edx_learners_set:
+                suplement_set.add(learner)
+    print "# suplement learners is:\t" + str(len(suplement_set)) + "\n"
+    '''
+    ###############################
     
     # Gather the unmatched twitter learners
     for learner in matching_results_map.keys():
@@ -358,29 +325,87 @@ def MergeMatchingResults(path):
     print "# unmatched learners is:\t" + str(len(edx_learners_set)) + "\n"
     
     # 2. Read fuzzy matching results
-    fuzzy_matching_results = {}
-    files = ["fuzzy_matching_local", "fuzzy_matching_remote"]
+    fuzzy_matching_results_map = {}
+    fuzzy_matching_results_set = set()
+    
+    files = ["fuzzy_matching_jan5", "fuzzy_matching_jan05_0", "fuzzy_matching_jan05_1", "fuzzy_matching_jan05_2",
+             "fuzzy_matching_jan05_3", "fuzzy_matching_jan05_4", "fuzzy_matching_jan05_5", "fuzzy_matching_jan05_6",]
+    
     for file in files:
-        result_path = path + "/twitter/" + file
+        
+        result_path = path + "twitter/temp_results/20160107/" + file
         result_file = open(result_path, "r")
         lines = result_file.readlines()
         
         for line in lines:
-            array = line.replace("\n", "").split("\t")
+            line = line.replace("\r\n", "")
+            line = line.replace("\n", "")
+            
+            array = line.split("\t")
+            
+            if len(array) != 2:
+                # print file + "\t" + line
+                continue
+            
+            '''
+            if array[1] != "" and "twitter.com" not in array[1]:
+                print file + "\t" + line
+                continue
+            '''
+            
             learner = array[0]
-            id = array[1]
+            login = array[1]
             
             if learner in edx_learners_set:
                 edx_learners_set.remove(learner)
-                
-            if id != "":
-                fuzzy_matching_results[learner] = id
-                
-    print "# fuzzy matching learners is:\t" + str(len(fuzzy_matching_results))
+            else:
+                continue
+            
+            if learner not in fuzzy_matching_results_set:
+                fuzzy_matching_results_map[learner] = login
+            else:
+                if fuzzy_matching_results_map[learner] == "":
+                    fuzzy_matching_results_map[learner] = login
+            
+            fuzzy_matching_results_set.add(learner)
     
-    output_path = path + "/twitter/fuzzy_matching"
+    ###############################
+    '''
+    upldated_fuzzy_matching_results_map = {}
+    for learner in fuzzy_matching_results_map.keys():
+        if learner not in suplement_set or fuzzy_matching_results_map[learner] != "":
+            upldated_fuzzy_matching_results_map[learner] = fuzzy_matching_results_map[learner]
+            if learner in suplement_set:
+                suplement_set.remove(learner)
+    fuzzy_matching_results_map.clear()
+    fuzzy_matching_results_map = upldated_fuzzy_matching_results_map.copy()
+    '''
+    ###############################
+                
+    print "# fuzzy matching learners is:\t" + str(len(fuzzy_matching_results_map))
+    print len(edx_learners_set)
+    print 
+    
+    output_path = path + "twitter/fuzzy_matching"
     output_file = open(output_path, "w")
-    output_file.write(json.dumps(fuzzy_matching_results))
+    #output_file.write(json.dumps(fuzzy_matching_results_map))
+    
+    for learner in fuzzy_matching_results_map.keys():
+        output_file.write(learner + "\t" + fuzzy_matching_results_map[learner] + "\n")
+    
+    #for learner in edx_learners_set:
+    #    output_file.write(learner + "\n")
+    
+    '''
+    ###############################
+    for learner in edx_learners_set:
+        output_file.write(learner + "\n")
+        
+    for learner in suplement_set:
+        if learner not in edx_learners_set:
+            output_file.write(learner + "\n")
+    ###############################
+    '''
     output_file.close()
     
     
@@ -397,12 +422,12 @@ def MergeMatchingResults(path):
 
 # 1. Fuzzy matching github learners
 path = "/Users/Angus/Downloads/"
-path = "/data/guanliang"
-FuzzyMatching(path)
+#path = "/data/guanliang"
+# FuzzyMatching(path)
 
 # 2. Merge matching results
-path = "/Users/Angus/Downloads/"
-#MergeMatchingResults(path)
+path = "/Volumes/NETAC/LinkingEdX/"
+MergeMatchingResults(path)
 
 print "Finished."
 
